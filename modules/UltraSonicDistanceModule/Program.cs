@@ -3,6 +3,7 @@ namespace UltraSonicDistanceModule
     using System;
     using System.Device.Gpio;
     using System.Diagnostics;
+    using System.Collections.Generic;
     using System.IO;
     using System.Runtime.InteropServices;
     using System.Runtime.Loader;
@@ -12,9 +13,25 @@ namespace UltraSonicDistanceModule
     using System.Threading.Tasks;
     using Microsoft.Azure.Devices.Client;
     using Microsoft.Azure.Devices.Client.Transport.Mqtt;
+    using Microsoft.Azure.Devices.Shared;
+    using Newtonsoft.Json;
+    using Newtonsoft.Json.Linq;
 
     class Program
     {
+
+        public class UltrasonicSensor 
+        {
+            // GPIO pin on which outbound ultrasonic burst is emitted
+            public int GpioTrigger {get; set;}
+            // GPIO pin listening for the return echo signal
+            public int GpioEcho {get; set;}
+            // Distance in meters below which a detection is reported
+            public double SensingDistance {get; set;}
+        }
+
+        private static List<UltrasonicSensor> sensors = new List<UltrasonicSensor>();
+
         static int counter;
 
         private static CancellationTokenSource cts;
@@ -24,10 +41,7 @@ namespace UltraSonicDistanceModule
 
         private static ModuleClient ioTHubModuleClient;
 
-        private static int GPIO_trigger = 18;
-        private static int GPIO_echo = 24;
-
-        static GpioController controller;
+        static GpioController controller = new GpioController ();
 
         static void Main(string[] args)
         {
@@ -65,17 +79,20 @@ namespace UltraSonicDistanceModule
             await ioTHubModuleClient.OpenAsync();
             Console.WriteLine("IoT Hub module client initialized.");
 
+            // Register desired property callback
+            await ioTHubModuleClient.SetDesiredPropertyUpdateCallbackAsync(OnDesiredPropertyChanged, null);
+
+            // Configure the ultrasonic sensors included in the module twin
+            Twin moduleTwin = await ioTHubModuleClient.GetTwinAsync();
+            ConfigureSensors(moduleTwin.Properties.Desired);
+
             // Register callback to be called when a message is received by the module
             await ioTHubModuleClient.SetInputMessageHandlerAsync("input1", PipeMessage, ioTHubModuleClient);
 
-            // Construct and configure GPIO controller/pins
-            controller = new GpioController ();
-            controller.OpenPin (GPIO_trigger, PinMode.Output);
-            controller.OpenPin(GPIO_echo, PinMode.Input);
-            Console.WriteLine("Pins opened");
 
-            // Debug do something
-            await SendDebugData(cts);
+
+            // Start sending telemetry
+            await SendTelemetry(cts);
         }
 
         private static long MilliSecsToTicks(double millisecs) {
@@ -92,34 +109,71 @@ namespace UltraSonicDistanceModule
             return milliseconds;
         }
 
-        private static async Task SendDebugData(CancellationTokenSource cts) {
+        private static async Task OnDesiredPropertyChanged(TwinCollection desiredProperties, object userContext) {
+            await Task.Run(()=>ConfigureSensors(desiredProperties));
+        }
+
+        static void ConfigureSensors(TwinCollection desiredProperties) {
+            if (desiredProperties.Contains("ultrasonicSensors")) {
+
+                // Close and clear old sensors
+                foreach (UltrasonicSensor oldSensor in sensors) {
+                    controller.ClosePin(oldSensor.GpioTrigger);
+                    controller.ClosePin(oldSensor.GpioEcho);
+                }
+                sensors.Clear();
+
+                // Parse and add new sensors
+                JArray moduleTwinSensors = desiredProperties["ultrasonicSensors"];
+                foreach (JObject sensor in moduleTwinSensors.Children()) {
+                    int moduleTwinGpioTrigger = sensor.GetValue("trigger").ToObject<int>();
+                    int moduleTwinGpioEcho = sensor.GetValue("echo").ToObject<int>();
+                    float moduleTwinSensingDistance = sensor.GetValue("sensingDistance").ToObject<float>();
+                    sensors.Add(new UltrasonicSensor(){GpioTrigger = moduleTwinGpioTrigger, GpioEcho = moduleTwinGpioEcho, SensingDistance = moduleTwinSensingDistance});
+                    Console.WriteLine($"Configured sensor with trigger = {moduleTwinGpioTrigger}, echo = {moduleTwinGpioEcho}, distance = {moduleTwinSensingDistance}.");
+                    controller.OpenPin(moduleTwinGpioTrigger, PinMode.Output);
+                    controller.OpenPin(moduleTwinGpioEcho, PinMode.Input);
+                    Console.WriteLine("Opened sensor pins.");
+                }
+            }
+        }
+
+        private static async Task SendTelemetry(CancellationTokenSource cts) {
             while (!cts.Token.IsCancellationRequested) {
 
-                // Transmit ultrasonic signal burst
-                controller.Write (GPIO_trigger, PinValue.High);
-                Stopwatch delay = Stopwatch.StartNew();
-                // Transmitting for 0.01 millisecs
-                while (TicksToMillisecs(delay.ElapsedTicks) < 0.01) {
+                foreach(UltrasonicSensor sensor in sensors) {
+
+                    // Transmit ultrasonic signal burst
+                    controller.Write (sensor.GpioTrigger, PinValue.High);
+                    Stopwatch delay = Stopwatch.StartNew();
+                    // Transmitting for 0.01 millisecs
+                    while (TicksToMillisecs(delay.ElapsedTicks) < 0.01) {
+                    }
+                    delay.Stop();
+                    controller.Write (sensor.GpioTrigger, PinValue.Low);
+
+                    // Measure the response time
+                    Stopwatch timer = Stopwatch.StartNew();
+                    while (controller.Read(sensor.GpioEcho) == PinValue.Low) {
+                    }
+                    timer.Stop();
+                    double millisecsTaken = TicksToMillisecs(timer.ElapsedTicks);
+
+                    // Distance computation: speed of sound is 0.343 m/millisecond. 
+                    // Divide by 2 to account for sound going both ways (it's an echo)
+                    double distance = (millisecsTaken * 0.343) / 2.0;
+                    Console.WriteLine($"Detected distance: {distance} meters.");
+
+                    // If within sensing distane: send message to IoTHub
+                    if (distance < sensor.SensingDistance) {
+                        string messagePayload = $"Distance measurement = {distance} meters.";
+                        Console.WriteLine($"Sending message: {messagePayload}");
+                        Message debugMessage = new Message(Encoding.ASCII.GetBytes(messagePayload));
+                        await ioTHubModuleClient.SendEventAsync(debugMessage);
+                    }
                 }
-                delay.Stop();
-                controller.Write (GPIO_trigger, PinValue.Low);
 
-                // Measure the response time
-                Stopwatch timer = Stopwatch.StartNew();
-                while (controller.Read(GPIO_echo) == PinValue.Low) {
-                }
-                timer.Stop();
-                double millisecsTaken = TicksToMillisecs(timer.ElapsedTicks);
-
-                // Distance computation: speed of sound is 0.343 m/millisecond. 
-                // Divide by 2 to account for sound going both ways (it's an echo)
-                double distance = (millisecsTaken * 0.343) / 2.0;
-
-                // Send message to IoTHub and wait predetermined time interval
-                string debugMessagePayload = $"Distance measurement = {distance} meters.";
-                Console.WriteLine($"Sending message: {debugMessagePayload}");
-                Message debugMessage = new Message(Encoding.ASCII.GetBytes(debugMessagePayload));
-                await ioTHubModuleClient.SendEventAsync(debugMessage);
+                // Wait predetermined time interval
                 await Task.Delay(telemetryInterval, cts.Token);
             }
         }
