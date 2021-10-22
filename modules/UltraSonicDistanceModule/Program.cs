@@ -1,6 +1,7 @@
 namespace UltraSonicDistanceModule
 {
     using System;
+    using System.Device.Gpio;
     using System.IO;
     using System.Runtime.InteropServices;
     using System.Runtime.Loader;
@@ -21,6 +22,11 @@ namespace UltraSonicDistanceModule
         private static TimeSpan telemetryInterval = new TimeSpan(0, 0, 10);
 
         private static ModuleClient ioTHubModuleClient;
+
+        private static int GPIO_trigger = 18;
+        private static int GPIO_echo = 24;
+
+        static GpioController controller;
 
         static void Main(string[] args)
         {
@@ -61,13 +67,33 @@ namespace UltraSonicDistanceModule
             // Register callback to be called when a message is received by the module
             await ioTHubModuleClient.SetInputMessageHandlerAsync("input1", PipeMessage, ioTHubModuleClient);
 
+            // Construct and configure GPIO controller/pins
+            controller = new GpioController ();
+            controller.OpenPin (GPIO_trigger, PinMode.Output);
+            controller.OpenPin(GPIO_echo, PinMode.Input);
+            Console.WriteLine("Pins opened");
+
             // Debug do something
             await SendDebugData(cts);
         }
 
         private static async Task SendDebugData(CancellationTokenSource cts) {
             while (!cts.Token.IsCancellationRequested) {
-                string debugMessagePayload = $"This is a debug message at {DateTime.Now.ToLongTimeString()}";
+                controller.Write (GPIO_trigger, PinValue.High);
+                await Task.Delay(1);
+                controller.Write (GPIO_trigger, PinValue.Low);
+                
+                DateTime startTime = DateTime.Now;
+                DateTime stopTime = DateTime.Now;
+
+                while (controller.Read(GPIO_echo) == PinValue.Low) {
+                    stopTime = DateTime.Now;
+                }
+
+                int timeElapsed = (stopTime - startTime).Milliseconds;
+                float distance = (timeElapsed * 34300) / 2;
+
+                string debugMessagePayload = $"Distance measurement = {distance}";
                 Console.WriteLine($"Sending message: {debugMessagePayload}");
                 Message debugMessage = new Message(Encoding.ASCII.GetBytes(debugMessagePayload));
                 await ioTHubModuleClient.SendEventAsync(debugMessage);

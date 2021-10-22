@@ -64,7 +64,11 @@
             "restartPolicy": "always",
             "settings": {
               "image": "${MODULES.UltraSonicDistanceModule.debug}",
-              "createOptions": {}
+              "createOptions": {
+                "HostConfig": {
+                  "Privileged": true
+                }
+              }
             }
           },
           "SimulatedTemperatureSensor": {
