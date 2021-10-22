@@ -57,8 +57,8 @@ namespace UltraSonicDistanceModule
 
         private static CancellationTokenSource cts;
 
-        // TODO: Make this configurable via Module Twin. Defaults to once every 10 seconds.
-        private static TimeSpan telemetryInterval = new TimeSpan(0, 0, 10);
+        // TODO: Make this configurable via Module Twin. Defaults to once every minute.
+        private static TimeSpan telemetryInterval = new TimeSpan(0, 1, 0);
 
         private static ModuleClient ioTHubModuleClient;
 

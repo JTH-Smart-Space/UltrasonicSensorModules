@@ -88,7 +88,7 @@
       "properties.desired": {
         "schemaVersion": "1.1",
         "routes": {
-          "UltraSonicDistanceModuleToIoTHub": "FROM /messages/modules/UltraSonicDistanceModule/outputs/* INTO $upstream",
+          "UltraSonicDistanceModuleToIoTHub": "FROM /messages/modules/UltraSonicDistanceModule/* INTO $upstream",
           "sensorToUltraSonicDistanceModule": "FROM /messages/modules/SimulatedTemperatureSensor/outputs/temperatureOutput INTO BrokeredEndpoint(\"/modules/UltraSonicDistanceModule/inputs/input1\")"
         },
         "storeAndForwardConfiguration": {
