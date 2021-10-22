@@ -2,6 +2,7 @@ namespace UltraSonicDistanceModule
 {
     using System;
     using System.Device.Gpio;
+    using System.Diagnostics;
     using System.IO;
     using System.Runtime.InteropServices;
     using System.Runtime.Loader;
@@ -77,23 +78,45 @@ namespace UltraSonicDistanceModule
             await SendDebugData(cts);
         }
 
+        private static long MilliSecsToTicks(double millisecs) {
+            long frequency = Stopwatch.Frequency;
+            double seconds = millisecs / 1000.0;
+            long ticks = (long)(seconds * frequency);
+            return ticks;
+        }
+
+        private static double TicksToMillisecs(long ticks) {
+            long frequency = Stopwatch.Frequency;
+            double seconds = (double)ticks / (double)frequency;
+            double milliseconds = seconds * 1000.0;
+            return milliseconds;
+        }
+
         private static async Task SendDebugData(CancellationTokenSource cts) {
             while (!cts.Token.IsCancellationRequested) {
+
+                // Transmit ultrasonic signal burst
                 controller.Write (GPIO_trigger, PinValue.High);
-                await Task.Delay(1);
-                controller.Write (GPIO_trigger, PinValue.Low);
-                
-                DateTime startTime = DateTime.Now;
-                DateTime stopTime = DateTime.Now;
-
-                while (controller.Read(GPIO_echo) == PinValue.Low) {
-                    stopTime = DateTime.Now;
+                Stopwatch delay = Stopwatch.StartNew();
+                // Transmitting for 0.01 millisecs
+                while (TicksToMillisecs(delay.ElapsedTicks) < 0.01) {
                 }
+                delay.Stop();
+                controller.Write (GPIO_trigger, PinValue.Low);
 
-                int timeElapsed = (stopTime - startTime).Milliseconds;
-                float distance = (timeElapsed * 34300) / 2;
+                // Measure the response time
+                Stopwatch timer = Stopwatch.StartNew();
+                while (controller.Read(GPIO_echo) == PinValue.Low) {
+                }
+                timer.Stop();
+                double millisecsTaken = TicksToMillisecs(timer.ElapsedTicks);
 
-                string debugMessagePayload = $"Distance measurement = {distance}";
+                // Distance computation: speed of sound is 0.343 m/millisecond. 
+                // Divide by 2 to account for sound going both ways (it's an echo)
+                double distance = (millisecsTaken * 0.343) / 2.0;
+
+                // Send message to IoTHub and wait predetermined time interval
+                string debugMessagePayload = $"Distance measurement = {distance} meters.";
                 Console.WriteLine($"Sending message: {debugMessagePayload}");
                 Message debugMessage = new Message(Encoding.ASCII.GetBytes(debugMessagePayload));
                 await ioTHubModuleClient.SendEventAsync(debugMessage);
