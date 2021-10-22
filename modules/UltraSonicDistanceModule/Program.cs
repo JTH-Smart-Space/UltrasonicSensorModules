@@ -20,6 +20,24 @@ namespace UltraSonicDistanceModule
     class Program
     {
 
+        public class Observation {
+            public DateTime observationTime {get; set;}
+            [JsonProperty("value")]
+            public double? numericValue {get; set;}
+            [JsonProperty("valueString")]
+            public string stringValue {get; set;}
+            [JsonProperty("valueBoolean")]
+            public bool? booleanValue {get; set;}
+            public Uri quantityKind {get; set;}
+            public Uri sensorId {get; set;}
+	    }
+	
+        public class RecEdgeMessage {
+            public string format {get {return "rec3.2";}}
+            public string deviceId {get; set;}
+            public List<Observation> observations { get; set; }
+        }
+
         public class UltrasonicSensor 
         {
             // GPIO pin on which outbound ultrasonic burst is emitted
@@ -28,7 +46,10 @@ namespace UltraSonicDistanceModule
             public int GpioEcho {get; set;}
             // Distance in meters below which a detection is reported
             public double SensingDistance {get; set;}
+            public string SensorId {get; set;}
         }
+
+        private static string ioTEdgeDeviceId = Environment.GetEnvironmentVariable("IOTEDGE_DEVICEID");
 
         private static List<UltrasonicSensor> sensors = new List<UltrasonicSensor>();
 
@@ -89,8 +110,6 @@ namespace UltraSonicDistanceModule
             // Register callback to be called when a message is received by the module
             await ioTHubModuleClient.SetInputMessageHandlerAsync("input1", PipeMessage, ioTHubModuleClient);
 
-
-
             // Start sending telemetry
             await SendTelemetry(cts);
         }
@@ -126,11 +145,12 @@ namespace UltraSonicDistanceModule
                 // Parse and add new sensors
                 JArray moduleTwinSensors = desiredProperties["ultrasonicSensors"];
                 foreach (JObject sensor in moduleTwinSensors.Children()) {
+                    string moduleTwinSensorId = sensor.GetValue("id").ToString();
                     int moduleTwinGpioTrigger = sensor.GetValue("trigger").ToObject<int>();
                     int moduleTwinGpioEcho = sensor.GetValue("echo").ToObject<int>();
                     float moduleTwinSensingDistance = sensor.GetValue("sensingDistance").ToObject<float>();
-                    sensors.Add(new UltrasonicSensor(){GpioTrigger = moduleTwinGpioTrigger, GpioEcho = moduleTwinGpioEcho, SensingDistance = moduleTwinSensingDistance});
-                    Console.WriteLine($"Configured sensor with trigger = {moduleTwinGpioTrigger}, echo = {moduleTwinGpioEcho}, distance = {moduleTwinSensingDistance}.");
+                    sensors.Add(new UltrasonicSensor(){SensorId = moduleTwinSensorId, GpioTrigger = moduleTwinGpioTrigger, GpioEcho = moduleTwinGpioEcho, SensingDistance = moduleTwinSensingDistance});
+                    Console.WriteLine($"Configured sensor ID = {moduleTwinSensorId} with trigger = {moduleTwinGpioTrigger}, echo = {moduleTwinGpioEcho}, distance = {moduleTwinSensingDistance}.");
                     controller.OpenPin(moduleTwinGpioTrigger, PinMode.Output);
                     controller.OpenPin(moduleTwinGpioEcho, PinMode.Input);
                     Console.WriteLine("Opened sensor pins.");
@@ -141,6 +161,11 @@ namespace UltraSonicDistanceModule
         private static async Task SendTelemetry(CancellationTokenSource cts) {
             while (!cts.Token.IsCancellationRequested) {
 
+                // REC edge message holder (reused but observations cleared on each iteration)
+                RecEdgeMessage recEdgeMessage = new RecEdgeMessage() { 
+                    deviceId = ioTEdgeDeviceId,
+                    observations = new List<Observation>()
+                };
                 foreach(UltrasonicSensor sensor in sensors) {
 
                     // Transmit ultrasonic signal burst
@@ -166,15 +191,30 @@ namespace UltraSonicDistanceModule
 
                     // If within sensing distane: send message to IoTHub
                     if (distance < sensor.SensingDistance) {
-                        string messagePayload = $"Distance measurement = {distance} meters.";
-                        Console.WriteLine($"Sending message: {messagePayload}");
-                        Message debugMessage = new Message(Encoding.ASCII.GetBytes(messagePayload));
-                        await ioTHubModuleClient.SendEventAsync(debugMessage);
+                        Observation presenceObservation = new Observation();
+                        presenceObservation.observationTime = DateTime.Now;
+                        presenceObservation.sensorId = new Uri($"http://example.com/{sensor.SensorId}");
+                        presenceObservation.booleanValue = true;
+                        recEdgeMessage.observations.Add(presenceObservation);
                     }
+                }
+
+                if (recEdgeMessage.observations.Count > 0) {
+                    JsonSerializerSettings serializerSettings = new JsonSerializerSettings {
+                        NullValueHandling = NullValueHandling.Ignore
+                    };
+                    string recEdgeMessageJson = JsonConvert.SerializeObject(recEdgeMessage, Formatting.None, serializerSettings);
+                    Message telemetryMessage = new Message(Encoding.ASCII.GetBytes(recEdgeMessageJson)) {
+                        ContentType = "application/json",
+                        ContentEncoding = "utf-8"
+                    };
+                    Console.WriteLine($"Sending message: {recEdgeMessageJson}");
+                    await ioTHubModuleClient.SendEventAsync(telemetryMessage);
                 }
 
                 // Wait predetermined time interval
                 await Task.Delay(telemetryInterval, cts.Token);
+                recEdgeMessage.observations.Clear();
             }
         }
 
