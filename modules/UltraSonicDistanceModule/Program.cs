@@ -189,16 +189,18 @@ namespace UltraSonicDistanceModule
                     double distance = (millisecsTaken * 0.343) / 2.0;
                     Console.WriteLine($"Detected distance: {distance} meters.");
 
-                    // If within sensing distane: send message to IoTHub
-                    if (distance < sensor.SensingDistance) {
-                        Observation presenceObservation = new Observation();
-                        presenceObservation.observationTime = DateTime.Now;
-                        presenceObservation.sensorId = new Uri($"http://example.com/{sensor.SensorId}");
-                        presenceObservation.booleanValue = true;
-                        recEdgeMessage.observations.Add(presenceObservation);
-                    }
+                    // Set up observation
+                    Observation presenceObservation = new Observation();
+                    presenceObservation.observationTime = DateTime.Now;
+                    presenceObservation.sensorId = new Uri($"http://example.com/{sensor.SensorId}");
+
+                    // If we see something within the configured sensing distane, 
+                    // report a motion, otherwise report no motion.
+                    presenceObservation.booleanValue = distance < sensor.SensingDistance;
+                    recEdgeMessage.observations.Add(presenceObservation);
                 }
 
+                // If there are any observations to report, send to IoTHub
                 if (recEdgeMessage.observations.Count > 0) {
                     JsonSerializerSettings serializerSettings = new JsonSerializerSettings {
                         NullValueHandling = NullValueHandling.Ignore
