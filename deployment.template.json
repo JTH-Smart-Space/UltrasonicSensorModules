@@ -70,16 +70,6 @@
                 }
               }
             }
-          },
-          "SimulatedTemperatureSensor": {
-            "version": "1.0",
-            "type": "docker",
-            "status": "running",
-            "restartPolicy": "always",
-            "settings": {
-              "image": "mcr.microsoft.com/azureiotedge-simulated-temperature-sensor:1.0",
-              "createOptions": {}
-            }
           }
         }
       }
@@ -88,12 +78,29 @@
       "properties.desired": {
         "schemaVersion": "1.1",
         "routes": {
-          "UltraSonicDistanceModuleToIoTHub": "FROM /messages/modules/UltraSonicDistanceModule/* INTO $upstream",
-          "sensorToUltraSonicDistanceModule": "FROM /messages/modules/SimulatedTemperatureSensor/outputs/temperatureOutput INTO BrokeredEndpoint(\"/modules/UltraSonicDistanceModule/inputs/input1\")"
+          "UltraSonicDistanceModuleToIoTHub": "FROM /messages/modules/UltraSonicDistanceModule/* INTO $upstream"
         },
         "storeAndForwardConfiguration": {
           "timeToLiveSecs": 7200
         }
+      }
+    },
+    "UltraSonicDistanceModule": {
+      "properties.desired": {
+        "ultrasonicSensors": [
+          {
+            "id": "8dcf72fd-80a5-47a4-bf13-2f21ddef452e",
+            "trigger": 5,
+            "echo": 6,
+            "sensingDistance": 1.0
+          },
+          {
+            "id": "cae243f6-1685-4e31-b513-e8f989c7b8f7",
+            "trigger": 16,
+            "echo": 17,
+            "sensingDistance": 1.0
+          }
+        ]
       }
     }
   }

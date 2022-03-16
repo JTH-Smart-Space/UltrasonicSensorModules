@@ -28,8 +28,7 @@ namespace UltraSonicDistanceModule
             public string stringValue {get; set;}
             [JsonProperty("valueBoolean")]
             public bool? booleanValue {get; set;}
-            public Uri quantityKind {get; set;}
-            public Uri sensorId {get; set;}
+            public string sensorId {get; set;}
 	    }
 	
         public class RecEdgeMessage {
@@ -107,9 +106,6 @@ namespace UltraSonicDistanceModule
             Twin moduleTwin = await ioTHubModuleClient.GetTwinAsync();
             ConfigureSensors(moduleTwin.Properties.Desired);
 
-            // Register callback to be called when a message is received by the module
-            await ioTHubModuleClient.SetInputMessageHandlerAsync("input1", PipeMessage, ioTHubModuleClient);
-
             // Start sending telemetry
             await SendTelemetry(cts);
         }
@@ -163,7 +159,7 @@ namespace UltraSonicDistanceModule
 
                 // REC edge message holder (reused but observations cleared on each iteration)
                 RecEdgeMessage recEdgeMessage = new RecEdgeMessage() { 
-                    deviceId = ioTEdgeDeviceId,
+                    //deviceId = ioTEdgeDeviceId,
                     observations = new List<Observation>()
                 };
                 foreach(UltrasonicSensor sensor in sensors) {
@@ -192,7 +188,7 @@ namespace UltraSonicDistanceModule
                     // Set up observation
                     Observation presenceObservation = new Observation();
                     presenceObservation.observationTime = DateTime.Now;
-                    presenceObservation.sensorId = new Uri($"http://example.com/{sensor.SensorId}");
+                    presenceObservation.sensorId = sensor.SensorId;
 
                     // If we see something within the configured sensing distane, 
                     // report a motion, otherwise report no motion.
@@ -218,41 +214,6 @@ namespace UltraSonicDistanceModule
                 await Task.Delay(telemetryInterval, cts.Token);
                 recEdgeMessage.observations.Clear();
             }
-        }
-
-        /// <summary>
-        /// This method is called whenever the module is sent a message from the EdgeHub. 
-        /// It just pipe the messages without any change.
-        /// It prints all the incoming messages.
-        /// </summary>
-        static async Task<MessageResponse> PipeMessage(Message message, object userContext)
-        {
-            int counterValue = Interlocked.Increment(ref counter);
-
-            var moduleClient = userContext as ModuleClient;
-            if (moduleClient == null)
-            {
-                throw new InvalidOperationException("UserContext doesn't contain " + "expected values");
-            }
-
-            byte[] messageBytes = message.GetBytes();
-            string messageString = Encoding.UTF8.GetString(messageBytes);
-            Console.WriteLine($"Received message: {counterValue}, Body: [{messageString}]");
-
-            if (!string.IsNullOrEmpty(messageString))
-            {
-                using (var pipeMessage = new Message(messageBytes))
-                {
-                    foreach (var prop in message.Properties)
-                    {
-                        pipeMessage.Properties.Add(prop.Key, prop.Value);
-                    }
-                    await moduleClient.SendEventAsync("output1", pipeMessage);
-                
-                    Console.WriteLine("Received message sent");
-                }
-            }
-            return MessageResponse.Completed;
         }
     }
 }
