@@ -183,7 +183,7 @@ namespace UltraSonicDistanceModule
                     // Distance computation: speed of sound is 0.343 m/millisecond. 
                     // Divide by 2 to account for sound going both ways (it's an echo)
                     double distance = (millisecsTaken * 0.343) / 2.0;
-                    Console.WriteLine($"Detected distance: {distance} meters.");
+                    Console.WriteLine($"Detected distance: {distance} meters on trigger pin {sensor.GpioTrigger}, echo pin {sensor.GpioEcho}.");
 
                     // Set up observation
                     Observation presenceObservation = new Observation();
